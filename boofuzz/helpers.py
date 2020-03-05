@@ -430,11 +430,39 @@ def get_boofuzz_version(boofuzz_class):
     return "v-.-.-"
 
 
-def str_to_bytes(value):
+def str_to_bytes(value,encoding='little'):
     result = value
     # if python2, str is alread bytes compatible
     if six.PY3:
         if isinstance(value, six.text_type):
-            temp = [bytes([ord(i)]) for i in value]
+            #temp = [bytes([ord(i)]) if ord(i)<256 else (ord(i).to_bytes(2,'little') if ord(i)<65536 else ord(i).to_bytes(4,'little')) for i in value]
+            temp = [ int_to_bytes(ord(i), encoding) for i in value]
             result = b"".join(temp)
     return result
+
+def int_to_bytes(x: int, encoding='little') -> bytes:
+        return x.to_bytes((x.bit_length() + 7) // 8, encoding)
+
+def int_from_bytes(xbytes: bytes, encoding='little') -> int:
+        return int.from_bytes(xbytes, encoding)
+
+def load_fuzz_dictionary(f):
+    entries = []
+    p = re.compile(r'"(.*)"')
+    kwp = re.compile(r'(.*)="(.*)"')
+
+    for line in f.readlines():
+        if line.startswith("#"):
+            continue
+        m = p.match(line)
+        mkw = kwp.match(line)
+        if m:
+            entry = m.group(1)
+        elif mkw:
+            entry = mkw.group(2)
+        else:
+            continue
+        decoded = entry.encode("utf-8").decode("unicode_escape")
+        entries.append(decoded)
+    print("Loaded %d entries from dictionary file" % len(entries))
+    return entries

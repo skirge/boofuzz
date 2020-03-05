@@ -1,4 +1,5 @@
 import struct
+import os
 
 import six
 from builtins import range
@@ -8,6 +9,8 @@ from .base_primitive import BasePrimitive
 from .. import helpers
 from ..constants import LITTLE_ENDIAN
 
+DIR = os.path.dirname(os.path.abspath(__file__))
+RFC_HEX_FILENAME = DIR + os.sep + "RFC_hex.txt"
 
 def binary_string_to_int(binary):
     """
@@ -114,6 +117,23 @@ class BitField(BasePrimitive):
                 self.add_integer_boundaries(self.max_num // 16)
                 self.add_integer_boundaries(self.max_num // 32)
                 self.add_integer_boundaries(self.max_num)
+
+                if "BOOFUZZ_SKIP_RFC_HEX" not in os.environ:
+                    with open(RFC_HEX_FILENAME) as f:
+                        hex_strings = f.readlines()
+                        for hexstring in hex_strings:
+                            w = int(hexstring,16)
+                            if w < self.max_num:
+                                self.add_integer_boundaries(w)
+
+                if "BOOFUZZ_DICT_DIR" in os.environ:
+                    for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
+                        for fileName in filenames:
+                            with open(os.path.join(dirpath, fileName)) as f:
+                                entries = helpers.load_fuzz_dictionary(f)
+                                for entry in entries:
+                                    if len(entry) <= self.width // 8:
+                                        self._fuzz_library.append(helpers.int_from_bytes(entry.encode('utf-8')))
 
             # TODO: Add injectable arbitrary bit fields
 

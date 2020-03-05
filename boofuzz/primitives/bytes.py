@@ -1,9 +1,14 @@
+import os
 from .base_primitive import BasePrimitive
 from .. import helpers
 
 
+DIR = os.path.dirname(os.path.abspath(__file__))
+RFC_HEX_FILENAME = DIR + os.sep + "RFC_hex.txt"
+
 class Bytes(BasePrimitive):
     # This binary strings will always included as testcases.
+    _fuzz_library_initialized = False
     _fuzz_library = [
         b"",
         b"\x00",
@@ -14,6 +19,8 @@ class Bytes(BasePrimitive):
         b"A" * 5000,
         b"A" * 10000,
         b"A" * 100000,
+        b"A" * 1000000,
+        b"A" * 10000000,
     ]
 
     # from https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_debug_values
@@ -123,6 +130,22 @@ class Bytes(BasePrimitive):
         self._name = name
         self.this_library = [self._value * 2, self._value * 10, self._value * 100]
 
+        if "BOOFUZZ_SKIP_RFC_HEX" not in os.environ:
+            if not Bytes._fuzz_library_initialized:
+                Bytes._fuzz_library_initialized = True
+                with open(RFC_HEX_FILENAME) as f:
+                    hex_strings = f.readlines()
+                    for hexstring in hex_strings:
+                        w = int(hexstring, 16)
+                        Bytes._fuzz_library.append(helpers.int_to_bytes(w))
+
+        if "BOOFUZZ_DICT_DIR" in os.environ:
+            for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
+                for fileName in filenames:
+                    with open(os.path.join(dirpath, fileName)) as f:
+                        entries = helpers.load_fuzz_dictionary(f)
+                        Bytes._fuzz_library.extend(entries)
+
     @property
     def name(self):
         return self._name
@@ -146,23 +169,23 @@ class Bytes(BasePrimitive):
                 self._value = self._original_value
                 return False
 
-            if self._mutant_index < len(self._fuzz_library):
+            if self._mutant_index < len(Bytes._fuzz_library):
                 # stage 1a: replace with _fuzz_library items
                 alreadyDone = 0
-                self._value = self._fuzz_library[self._mutant_index - alreadyDone]
-            elif self._mutant_index < len(self._fuzz_library) + len(self.this_library):
+                self._value = Bytes._fuzz_library[self._mutant_index - alreadyDone]
+            elif self._mutant_index < len(Bytes._fuzz_library) + len(self.this_library):
                 # stage 1b: replace with this_library items
-                alreadyDone = len(self._fuzz_library)
+                alreadyDone = len(Bytes._fuzz_library)
                 self._value = self.this_library[self._mutant_index - alreadyDone]
-            elif self._mutant_index < len(self._fuzz_library) + len(self.this_library) + len(self._magic_debug_values):
+            elif self._mutant_index < len(Bytes._fuzz_library) + len(self.this_library) + len(self._magic_debug_values):
                 # stage 1c: replace with _magic_debug_value items
-                alreadyDone = len(self._fuzz_library) + len(self.this_library)
+                alreadyDone = len(Bytes._fuzz_library) + len(self.this_library)
                 self._value = self._magic_debug_values[self._mutant_index - alreadyDone]
             else:
                 # stage 2a: replace every single byte with a value from _fuzz_strings_1byte
                 # stage 2b: replace every double byte block with a value from _fuzz_strings_2byte
                 # stage 2c: replace every four byte block with a value from _fuzz_strings_4byte
-                alreadyDone = len(self._fuzz_library) + len(self.this_library) + len(self._magic_debug_values)
+                alreadyDone = len(Bytes._fuzz_library) + len(self.this_library) + len(self._magic_debug_values)
                 testcase_nr = self._mutant_index - alreadyDone
                 testcases_2a = len(self._fuzz_strings_1byte) * max(0, len(self._original_value) - 0)
                 testcases_2b = len(self._fuzz_strings_2byte) * max(0, len(self._original_value) - 1)
