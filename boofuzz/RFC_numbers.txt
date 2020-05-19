@@ -33160,12 +33160,3 @@
 9999999999999
 99999999999999999
 999999999999999999999999998
-Plik binarny rfc542.txt pasuje do wzorca
-Plik binarny rfc652.txt pasuje do wzorca
-Plik binarny rfc674.txt pasuje do wzorca
-Plik binarny rfc684.txt pasuje do wzorca
-Plik binarny rfc734.txt pasuje do wzorca
-Plik binarny rfc736.txt pasuje do wzorca
-Plik binarny rfc752.txt pasuje do wzorca
-Plik binarny rfc774.txt pasuje do wzorca
-Plik binarny rfc776.txt pasuje do wzorca

@@ -1,17 +1,12 @@
 import random
 import base64
-import os
-import json
 
 import six
 from past.builtins import range
 
 from .base_primitive import BasePrimitive
 from .. import helpers
-
-DIR = os.path.dirname(os.path.abspath(__file__))
-BLONS_FILENAME = DIR + os.sep + "blns.base64.json"
-RFC_KEYWORDS_FILENAME = DIR + os.sep + "RFC_keywords.txt"
+from ..sessions import Dictionary
 
 class String(BasePrimitive):
     # store fuzz_library as a class variable to avoid copying the ~70MB structure across each instantiated primitive.
@@ -340,25 +335,12 @@ class String(BasePrimitive):
                 "1; waitfor delay b'0:30:0'--",
             ]
 
-            # Big list of naugthy strings
-            if "BOOFUZZ_SKIP_BLONS" not in os.environ:
-                with open(BLONS_FILENAME) as f:
-                    blons = json.load(f)
-                    String._fuzz_library.extend(map(base64.b64decode,blons))
-                    String._fuzz_library.extend(blons)
+            String._fuzz_library.extend(map(base64.b64decode, Dictionary.get_blons()))
+            String._fuzz_library.extend(Dictionary.get_blons())
+            String._fuzz_library.extend(Dictionary.get_rfc_keywords())
+            String._fuzz_library.extend(Dictionary.get_custom())
 
-            # all command (UPPER case words) from all RFC documents
-            if "BOOFUZZ_SKIP_RFC_KEYWORDS" not in os.environ:
-                with open(RFC_KEYWORDS_FILENAME) as f:
-                    rfc_keywords = f.readlines()
-                    String._fuzz_library.extend(rfc_keywords)
 
-            if "BOOFUZZ_DICT_DIR" in os.environ:
-                for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
-                    for fileName in filenames:
-                        with open(os.path.join(dirpath, fileName)) as f:
-                            entries = helpers.load_fuzz_dictionary(f)
-                            String._fuzz_library.extend(entries)
 
             # add some long strings.
             self.add_long_strings("C")
@@ -400,9 +382,9 @@ class String(BasePrimitive):
                     s = s[:loc] + "\x00" + s[loc:]
                 String._fuzz_library.append(s)
 
-                # TODO: Add easy and sane string injection from external file/s
-
         self.this_library.extend(self.generate_payloads(self._value, encoding))
+        self.this_library = list(dict.fromkeys(self.this_library))
+        String._fuzz_library = list(dict.fromkeys(String._fuzz_library))
 
         # Remove any fuzz items greater than self.max_len
         if self.max_len > 0:

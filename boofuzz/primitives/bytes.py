@@ -1,10 +1,7 @@
 import os
 from .base_primitive import BasePrimitive
 from .. import helpers
-
-
-DIR = os.path.dirname(os.path.abspath(__file__))
-RFC_HEX_FILENAME = DIR + os.sep + "RFC_hex.txt"
+from ..sessions import Dictionary
 
 class Bytes(BasePrimitive):
     # This binary strings will always included as testcases.
@@ -130,21 +127,11 @@ class Bytes(BasePrimitive):
         self._name = name
         self.this_library = [self._value * 2, self._value * 10, self._value * 100]
 
-        if "BOOFUZZ_SKIP_RFC_HEX" not in os.environ:
-            if not Bytes._fuzz_library_initialized:
-                Bytes._fuzz_library_initialized = True
-                with open(RFC_HEX_FILENAME) as f:
-                    hex_strings = f.readlines()
-                    for hexstring in hex_strings:
-                        w = int(hexstring, 16)
-                        Bytes._fuzz_library.append(helpers.int_to_bytes(w))
+        for w in (Dictionary.get_rfc_hex() + Dictionary.get_rfc_numbers()):
+            if w // 8 <= self.max_len:
+                Bytes._fuzz_library.append(helpers.int_to_bytes(w))
 
-        if "BOOFUZZ_DICT_DIR" in os.environ:
-            for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
-                for fileName in filenames:
-                    with open(os.path.join(dirpath, fileName)) as f:
-                        entries = helpers.load_fuzz_dictionary(f)
-                        Bytes._fuzz_library.extend(entries)
+        Bytes._fuzz_library.extend(filter(lambda x: len(x) <= self.max_len, Dictionary.get_custom()))
 
     @property
     def name(self):

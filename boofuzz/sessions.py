@@ -13,6 +13,7 @@ import traceback
 import zlib
 from builtins import input
 from io import open
+import json
 
 import six
 from future.utils import listitems
@@ -35,6 +36,11 @@ from boofuzz import (
 )
 from boofuzz.web.app import app
 
+DIR = os.path.dirname(os.path.abspath(__file__))
+RFC_HEX_FILENAME = DIR + os.sep + "RFC_hex.txt"
+RFC_NUMBERS_FILENAME = DIR + os.sep + "RFC_numbers.txt"
+BLONS_FILENAME = DIR + os.sep + "blns.base64.json"
+RFC_KEYWORDS_FILENAME = DIR + os.sep + "RFC_keywords.txt"
 
 class Target(object):
     """Target descriptor container.
@@ -291,6 +297,118 @@ def open_test_run(db_filename, port=constants.DEFAULT_WEB_UI_PORT, address="loca
     w = WebApp(session_info=s, web_port=port, web_addr=address)
     w.server_init()
 
+class Dictionary():
+    _blons = None
+    _rfc_keywords = None
+    _rfc_hex = None
+    _rfc_numbers = None
+    _custom_dicts = None
+
+    def __init__(self, logger):
+        self.set_logger(logger)
+
+    @classmethod
+    def set_logger(cls, logger):
+        cls.logger = logger
+
+    @classmethod
+    def get_logger(cls):
+        return cls.logger
+
+    @classmethod
+    def get_blons(cls):
+        if cls._blons is None:
+            cls.load_blons()
+        return cls._blons
+
+    @classmethod
+    def load_blons(cls, logger = None):
+        # Big list of naugthy strings
+        if "BOOFUZZ_SKIP_BLONS" not in os.environ:
+            with open(BLONS_FILENAME) as f:
+                cls._blons = json.load(f)
+            cls._blons = list(dict.fromkeys(cls._blons))
+            #cls.get_logger().log_info("Loaded %d entries from BLONS dictionary" % len(cls._blons))
+
+    @classmethod
+    def get_rfc_keywords(cls):
+        if cls._rfc_keywords is None:
+            cls._rfc_keywords = []
+            cls.load_rfc_keywords()
+        return cls._rfc_keywords
+
+    @classmethod
+    def load_rfc_keywords(cls):
+        # all command (UPPER case words) from all RFC documents
+        if "BOOFUZZ_SKIP_RFC_KEYWORDS" not in os.environ:
+            with open(RFC_KEYWORDS_FILENAME) as f:
+                cls._rfc_keywords.extend(f.readlines())
+                #cls.get_logger().log_info("Loaded %d entries from RFC keywords dictionary" % len(cls._rfc_keywords))
+            cls._rfc_keywords = list(dict.fromkeys(cls._rfc_keywords))
+
+    @classmethod
+    def get_custom(cls):
+        if cls._custom_dicts is None:
+            cls._custom_dicts = []
+            cls.load_custom()
+        return cls._custom_dicts
+
+    @classmethod
+    def load_custom(cls, logger = None):
+        if "BOOFUZZ_DICT_DIR" in os.environ:
+            for (dirpath, dirnames, filenames) in os.walk(os.environ["BOOFUZZ_DICT_DIR"]):
+                for fileName in filenames:
+                    with open(os.path.join(dirpath, fileName)) as f:
+                        entries = helpers.load_fuzz_dictionary(f)
+                        #cls.get_logger().log_info("Loaded %d entries from dictionary %s" % (len(entries), fileName))
+                        cls._custom_dicts.extend(entries)
+            cls._custom_dicts = list(dict.fromkeys(cls._custom_dicts))
+
+    @classmethod
+    def get_rfc_hex(cls):
+        if cls._rfc_hex is None:
+            cls._rfc_hex= []
+            cls.load_rfc_hex()
+        return cls._rfc_hex
+
+    @classmethod
+    def load_rfc_hex(cls, logger = None):
+        if "BOOFUZZ_SKIP_RFC_HEX" not in os.environ:
+            with open(RFC_HEX_FILENAME) as f:
+                hex_strings = f.readlines()
+                for hexstring in hex_strings:
+                    w = int(hexstring, 16)
+                    cls._rfc_hex.append(w)
+            cls._rfc_hex = list(dict.fromkeys(cls._rfc_hex))
+            #cls.get_logger().log_info("Loaded %d entries from RFC hex dictionary" % len(cls._rfc_hex))
+
+    @classmethod
+    def get_rfc_numbers(cls):
+        if cls._rfc_numbers is None:
+            cls._rfc_numbers = []
+            cls.load_rfc_numbers()
+        return cls._rfc_numbers
+
+    @classmethod
+    def load_rfc_numbers(cls, logger = None):
+        if "BOOFUZZ_SKIP_RFC_NUMBERS" not in os.environ:
+            with open(RFC_NUMBERS_FILENAME) as f:
+                hex_strings = f.readlines()
+                for hexstring in hex_strings:
+                    try:
+                        w = int(hexstring, 0)
+                        cls._rfc_numbers.append(w)
+                    except:
+                        pass
+
+                for hexstring in hex_strings:
+                    try:
+                        w = int(hexstring, 8)
+                        cls._rfc_numbers.append(w)
+                    except:
+                        pass
+            cls._rfc_numbers = list(dict.fromkeys(cls._rfc_numbers))
+            #cls.get_logger().log_info("Loaded %d entries from RFC numbers dictionary" % len(cls._rfc_numbers))
 
 class Session(pgraph.Graph):
     """
@@ -465,6 +583,7 @@ class Session(pgraph.Graph):
 
         # import settings if they exist.
         self.import_file()
+        self.dictionary = Dictionary(self._fuzz_data_logger)
 
         # create a root node. we do this because we need to start fuzzing from a single point and the user may want
         # to specify a number of initial requests.
